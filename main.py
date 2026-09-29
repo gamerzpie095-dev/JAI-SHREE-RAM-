@@ -1,4 +1,8 @@
-import os, json, telebot, qrcode, io
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+print(f"Token loaded: {BOT_TOKEN}") # ye line add kar
+if not BOT_TOKEN:
+    print("ERROR: BOT_TOKEN nahi mila! Render Environment me add karo")
+    import os, json, telebot, qrcode, io
 from flask import Flask
 import threading
 from telebot import types
