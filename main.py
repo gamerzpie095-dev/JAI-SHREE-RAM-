@@ -292,3 +292,75 @@ def home(): return "Bot is running!"
 def run(): app.run(host='0.0.0.0', port=10000)
 threading.Thread(target=run).start()
 bot.infinity_polling(skip_pending=True)
+import os
+import json
+import telebot
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 5735299456
+BOT_USERNAME = "Dubeyfflikesbot"
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# Load referrals
+def load_refs():
+    try:
+        with open('referrals.json','r') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_refs(data):
+    with open('referrals.json','w') as f:
+        json.dump(data, f)
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = str(message.from_user.id)
+    user_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+    refs = load_refs()
+
+    # Referral check
+    args = message.text.split()
+    if len(args) > 1:
+        referrer = args[1]
+        if referrer!= user_id:
+            if referrer not in refs:
+                refs[referrer] = []
+            if user_id not in refs[referrer]:
+                refs[referrer].append(user_id)
+                save_refs(refs)
+                count = len(refs[referrer])
+
+                # User ko batana
+                try:
+                    bot.send_message(referrer, f"✅ 1 New User Joined! Total: {count}")
+                except: pass
+
+                # Har 5 pe admin ko notify
+                if count % 5 == 0:
+                    likes = (count // 5) * 100
+                    # Admin ko
+                    bot.send_message(ADMIN_ID, f"🔥 NEW REWARD UNLOCKED!\n\nWinner ID: {referrer}\nUsername: {user_name}\nTotal Invites: {count}\nReward: {likes} Likes\n\nCheck karke likes de do!")
+                    # Winner ko
+                    try:
+                        bot.send_message(referrer, f"🎉 MUBARAK HO! {count} Invite Complete!\n\nTumne {likes} Likes jeet liye!\nApna Instagram Username bhejo!")
+                    except: pass
+
+    if user_id not in refs:
+        refs[user_id] = []
+        save_refs(refs)
+
+    count = len(refs[user_id])
+    link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+
+    bot.send_message(message.chat.id, f"👋 Welcome {message.from_user.first_name}!\n\n🔗 Tera Referral Link:\n{link}\n\n📊 Score: {count} Invites\n🎁 Har 5 Invite = 100 Likes\n\nDosto ko share kar aur likes kama!")
+
+@bot.message_handler(func=lambda m: True)
+def handle_all(message):
+    # Agar koi Insta ID bhejta hai to admin ko forward
+    bot.send_message(ADMIN_ID, f"📩 Insta ID Aaya:\nFrom: @{message.from_user.username} ({message.from_user.id})\nID: {message.text}")
+    bot.send_message(message.chat.id, "✅ Insta ID mil gaya! 5-10 min me likes aa jayenge!")
+
+print("Bot Running...")
+bot.infinity_polling()
