@@ -4,16 +4,17 @@ from telebot import types
 from flask import Flask
 import qrcode
 
+# --- CONFIG ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 5735299456
 SUPPORT_ID = 6014936495
 UPI_ID = "dubeyadarsh17@fam"
-BOT_USERNAME = "Dubeyfflikebot"
+BOT_USERNAME = "Dubeyfflikebot" # Without @
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 @app.route('/')
-def home(): return "JAI SHREE RAM - Bot Live"
+def home(): return "Bot is Live"
 
 def load_json(f):
     try:
@@ -32,18 +33,22 @@ PACKAGES = {
 }
 
 user_data = {}
+
+# Main Menu Buttons
 MAIN_MARKUP = types.ReplyKeyboardMarkup(resize_keyboard=True)
-MAIN_MARKUP.add("🛒 Order", "👥 Referral", "📞 Support")
+MAIN_MARKUP.add("Order", "Referral")
+MAIN_MARKUP.add("Support", "Cancel")
 
-def show_main_menu(chat_id, text):
-    bot.send_message(chat_id, text, reply_markup=MAIN_MARKUP)
+def get_user_display(m):
+    return f"@{m.from_user.username}" if m.from_user.username else m.from_user.first_name
 
+# --- START ---
 @bot.message_handler(commands=['start'])
 def start(m):
     user_id = str(m.from_user.id)
-    username = m.from_user.username or m.from_user.first_name
+    username = get_user_display(m)
 
-    # Referral Logic
+    # Referral Tracking
     args = m.text.split()
     if len(args) > 1:
         referrer = args[1]
@@ -56,93 +61,133 @@ def start(m):
                 count = len(data[referrer])
                 if count % 5 == 0:
                     try:
-                        bot.send_message(ADMIN_ID, f"🔥 REFERRAL COMPLETE 🔥\nYe username ka banda hai: @{username} (ID: {referrer}) ne 5 referral complete kiya hai. Total: {count}")
-                        bot.send_message(int(referrer), f"🎉 5 Referral Complete! 100 Likes Free milega!")
-                    except: pass
+                        bot.send_message(ADMIN_ID, f"REFERRAL COMPLETE\nUser: {username} (ID: {referrer}) has completed 5 referrals.\nTotal referrals: {count}\nReward: 100 Likes Free")
+                        bot.send_message(int(referrer), f"Congratulations! You completed 5 referrals. You will get 100 Likes Free. Admin has been notified.")
+                    except:
+                        pass
 
-    bot.send_message(m.chat.id, f"JAI SHREE RAM 🙏 {username}\n\nApni Free Fire UID bhejo:", reply_markup=MAIN_MARKUP)
+    bot.send_message(m.chat.id, f"Welcome {username}!\n\nWelcome to DUBEY FF SERVICES\nPlease send your Free Fire UID:", reply_markup=MAIN_MARKUP)
     bot.register_next_step_handler(m, get_uid)
 
 def get_uid(m):
-    if m.text in ["🛒 Order", "👥 Referral", "📞 Support"]:
-        handle_menu(m)
-        return
-    user_data[m.from_user.id] = {"username": m.from_user.username or m.from_user.first_name, "uid": m.text}
-    bot.send_message(m.chat.id, "Region bhejo (Ex: India):", reply_markup=MAIN_MARKUP)
+    if m.text == "Cancel":
+        return cancel_order(m)
+    if m.text in ["Order", "Referral", "Support"]:
+        return handle_menu(m)
+    user_data[m.from_user.id] = {"username": get_user_display(m), "user_id": m.from_user.id, "uid": m.text.strip()}
+    bot.send_message(m.chat.id, "Please send your Region (Example: India):", reply_markup=MAIN_MARKUP)
     bot.register_next_step_handler(m, get_region)
 
 def get_region(m):
-    if m.text in ["🛒 Order", "👥 Referral", "📞 Support"]:
-        handle_menu(m)
-        return
-    user_data[m.from_user.id]['region'] = m.text
+    if m.text == "Cancel":
+        return cancel_order(m)
+    if m.text in ["Order", "Referral", "Support"]:
+        return handle_menu(m)
+    if m.from_user.id not in user_data:
+        user_data[m.from_user.id] = {}
+    user_data[m.from_user.id]['region'] = m.text.strip()
+
     markup = types.InlineKeyboardMarkup(row_width=1)
     for pkg, price in PACKAGES.items():
-        markup.add(types.InlineKeyboardButton(f"{pkg} - {price} RS", callback_data=f"pkg_{price}_{pkg}"))
-    bot.send_message(m.chat.id, f"UID: {user_data[m.from_user.id]['uid']}\nRegion: {m.text}\n\nPackage Select Karo:", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton(f"{pkg} - Rs {price}", callback_data=f"pkg_{price}_{pkg}"))
+
+    bot.send_message(m.chat.id, f"UID: {user_data[m.from_user.id]['uid']}\nRegion: {m.text}\n\nPlease select a package:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pkg_"))
 def select_pkg(c):
     parts = c.data.split("_", 2)
     price = parts[1]
     pkg_name = parts[2]
-    uid = user_data.get(c.from_user.id, {}).get('uid', 'N/A')
-    region = user_data.get(c.from_user.id, {}).get('region', 'N/A')
-    user_data[c.from_user.id].update({"pkg": pkg_name, "price": price})
 
-    upi_link = f"upi://pay?pa={UPI_ID}&pn=Dubey&am={price}&cu=INR&tn={uid}"
+    if c.from_user.id not in user_data:
+        bot.answer_callback_query(c.id, "Please send /start again")
+        return
+
+    user_data[c.from_user.id].update({"pkg": pkg_name, "price": price})
+    uid = user_data[c.from_user.id].get('uid', 'N/A')
+    region = user_data[c.from_user.id].get('region', 'N/A')
+
+    # QR Code
+    upi_link = f"upi://pay?pa={UPI_ID}&pn=DUBEY FF&am={price}&cu=INR&tn=FF_{uid}"
     qr = qrcode.make(upi_link)
     bio = io.BytesIO()
     qr.save(bio, 'PNG')
     bio.seek(0)
 
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✅ Paid", callback_data="paid"), types.InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
+    markup.add(types.InlineKeyboardButton("Paid", callback_data="paid"), types.InlineKeyboardButton("Cancel", callback_data="cancel"))
 
-    caption = f"📦 {pkg_name}\n💰 Rs {price}\n🆔 UID: {uid}\n🌍 {region}\n\nUPI ID: {UPI_ID}\nQR Scan karke pay karo."
+    caption = f"Package: {pkg_name}\nPrice: Rs {price}\nUID: {uid}\nRegion: {region}\nUPI ID: {UPI_ID}\n\nScan the QR code and pay. After payment, click Paid and send screenshot. If you want to cancel, click Cancel."
     bot.send_photo(c.message.chat.id, bio, caption=caption, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data in ["paid", "cancel"])
-def paid_cancel(c):
+def paid_cancel_inline(c):
     if c.data == "cancel":
-        show_main_menu(c.message.chat.id, "Order Cancelled. /start se dobara shuru karo.")
+        user_data.pop(c.from_user.id, None)
+        bot.send_message(c.message.chat.id, "Order cancelled. Send /start to create a new order.", reply_markup=MAIN_MARKUP)
         return
-    bot.send_message(c.message.chat.id, "Payment ka Screenshot bhejo:", reply_markup=MAIN_MARKUP)
+    bot.send_message(c.message.chat.id, "Please send your payment screenshot:", reply_markup=MAIN_MARKUP)
     bot.register_next_step_handler(c.message, get_screenshot)
 
+def cancel_order(m):
+    user_data.pop(m.from_user.id, None)
+    bot.send_message(m.chat.id, "Order cancelled. Send /start to start again.", reply_markup=MAIN_MARKUP)
+
+@bot.message_handler(commands=['cancel'])
+def cancel_cmd(m):
+    cancel_order(m)
+
 def get_screenshot(m):
+    if m.text == "Cancel":
+        return cancel_order(m)
     if not m.photo:
-        bot.send_message(m.chat.id, "Screenshot Photo bhejo bhai!", reply_markup=MAIN_MARKUP)
+        bot.send_message(m.chat.id, "Please send a screenshot as a photo. Or send Cancel to cancel.", reply_markup=MAIN_MARKUP)
         bot.register_next_step_handler(m, get_screenshot)
         return
-    data = user_data.get(m.from_user.id, {})
-    caption = f"💸 NEW PAID ORDER\n\nUser: @{data.get('username')} ({m.from_user.id})\nUID: {data.get('uid')}\nRegion: {data.get('region')}\nPackage: {data.get('pkg')}\nPrice: {data.get('price')}\nUPI: {UPI_ID}"
-    bot.send_photo(ADMIN_ID, m.photo[-1].file_id, caption=caption)
-    show_main_menu(m.chat.id, "✅ Order Received! Admin check karega. JAI SHREE RAM 🙏")
 
-@bot.message_handler(func=lambda m: m.text in ["🛒 Order", "👥 Referral", "📞 Support"] or m.text in ["/referral", "/support"])
+    data = user_data.get(m.from_user.id, {})
+    caption = f"NEW PAID ORDER\n\nUser: {data.get('username')} ({data.get('user_id')})\nUID: {data.get('uid')}\nRegion: {data.get('region')}\nPackage: {data.get('pkg')}\nPrice: Rs {data.get('price')}\nUPI: {UPI_ID}"
+
+    bot.send_photo(ADMIN_ID, m.photo[-1].file_id, caption=caption)
+    bot.send_message(m.chat.id, "Order received! Admin will verify and deliver likes within 1-2 hours. If you have any issue, contact Support.", reply_markup=MAIN_MARKUP)
+    user_data.pop(m.from_user.id, None)
+
+# --- MENU HANDLERS ---
+@bot.message_handler(func=lambda m: m.text in ["Order", "Referral", "Support", "Cancel"])
 def handle_menu(m):
-    if m.text == "👥 Referral" or m.text == "/referral":
+    if m.text == "Cancel":
+        return cancel_order(m)
+    elif m.text == "Referral" or m.text == "/referral":
         link = f"https://t.me/{BOT_USERNAME}?start={m.from_user.id}"
         data = load_json('referrals.json')
         count = len(data.get(str(m.from_user.id), []))
-        show_main_menu(m.chat.id, f"👥 REFERRAL\n\nYour Link:\n{link}\n\nTotal: {count}\nEvery 5 referral you will get 100 like FREE!")
-    elif m.text == "📞 Support" or m.text == "/support":
-        bot.send_message(m.chat.id, "Apni problem bhejo:", reply_markup=MAIN_MARKUP)
+        bot.send_message(m.chat.id, f"REFERRAL MENU\n\nYour referral link:\n{link}\n\nTotal referrals: {count}\n\nEvery 5 referrals you will get 100 likes free.", reply_markup=MAIN_MARKUP)
+    elif m.text == "Support" or m.text == "/support":
+        bot.send_message(m.chat.id, "Please write your problem and send. If you have a screenshot, send it.", reply_markup=MAIN_MARKUP)
         bot.register_next_step_handler(m, support_msg)
-    elif m.text == "🛒 Order":
-        bot.send_message(m.chat.id, "Order ke liye /start dabao", reply_markup=MAIN_MARKUP)
+    elif m.text == "Order":
+        bot.send_message(m.chat.id, "To place a new order, please send /start", reply_markup=MAIN_MARKUP)
+
+@bot.message_handler(commands=['referral', 'support'])
+def cmd_handler(m):
+    m.text = f"/{m.text}"
+    if m.text == "/referral": m.text = "Referral"
+    if m.text == "/support": m.text = "Support"
+    handle_menu(m)
 
 def support_msg(m):
-    username = m.from_user.username or m.from_user.first_name
-    cap = f"📞 SUPPORT\nUser: @{username} ({m.from_user.id})\nMsg: {m.text}"
+    if m.text == "Cancel":
+        return cancel_order(m)
+    cap = f"SUPPORT MESSAGE\n\nUser: {get_user_display(m)} ({m.from_user.id})\nMessage: {m.text if m.text else 'Photo'}"
     if m.photo:
         bot.send_photo(SUPPORT_ID, m.photo[-1].file_id, caption=cap)
     else:
         bot.send_message(SUPPORT_ID, cap)
-    show_main_menu(m.chat.id, "Support ko bhej diya hai!")
+    bot.send_message(m.chat.id, "Your message has been sent to support team.", reply_markup=MAIN_MARKUP)
 
+# --- RUN ---
 def run_bot():
+    print("Bot Starting...")
     bot.infinity_polling()
 
 if __name__ == "__main__":
